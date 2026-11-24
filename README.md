@@ -4,10 +4,10 @@
 
 If GitHub blocks that link, open https://res-enclosure-retreat-gently.trycloudflare.com/ and tap **INSTALL**.
 
-Indexes BDIX h5ai media servers (LAN hosts and `main.circleftp.net`) and exposes them as
-Stremio catalogs with **direct HTTP streams**. No FTP proxy is needed: the media is
-already served over HTTP with `Accept-Ranges: bytes` (verified on `http://172.16.50.7/`),
-so seeking works.
+Indexes BDIX h5ai media servers — both the LAN hosts and the public hosts linked by
+`http://main.circleftp.net/` — and exposes them as Stremio catalogs with **direct HTTP
+streams**. No FTP proxy is needed: the files already return `Accept-Ranges: bytes` and
+`206` for range requests (verified on both the LAN and Circle hosts), so seeking works.
 
 ## What was checked
 
@@ -16,15 +16,19 @@ so seeking works.
 | `http://172.16.50.7/` | nginx + h5ai media index |
 | `http://172.16.50.7/DHAKA-FLIX-7/English Movies/(2024)/...` | per-title folders, `a_AL_.jpg` posters, direct `.mkv` files |
 | Direct `.mkv` HEAD | `200`, `Content-Length`, `Accept-Ranges: bytes` |
-| `http://main.circleftp.net/` | WordPress front-end listing the same library |
+| `http://main.circleftp.net/` | WordPress catalog; Play buttons call `vidSwap('http://...')` with direct `.mkv`/`.mp4` URLs |
+| `ftp13 / ftp17 / index1 / index2 / index` `.circleftp.net` | Public h5ai v0.29.2 hosts, same `fb-i/fb-n/fb-d/fb-s` row format the crawler parses |
+| Circle direct file | `HEAD 200`, `Accept-Ranges: bytes`, `Range: bytes=0-1023` → `206` |
 
 The crawler reads h5ai directory listings recursively, builds one catalog item per
 movie folder, and one `series` item per series folder with `Season N` subfolders.
 
 ## Current index
 
-Last full crawl: **39,603 titles** (34,135 movies + 5,468 series) from 39,952 directories across 17 roots.
-2 directory fetches timed out; everything else indexed cleanly.
+**62,577 titles** (56,950 movies + 5,627 series) from 63,374 directories across 27 roots:
+17 LAN roots + 10 public roots from `main.circleftp.net`. 2 old LAN directory fetches
+timed out; the Circle crawl had 0 errors. `ftp3` and `ftp5` were excluded because they
+timed out from the crawl machine, but their paths can be added to `DEFAULT_ROOTS` later.
 
 ## One-click install on phone
 
@@ -51,8 +55,9 @@ Tap-style deep link:
 stremio://res-enclosure-retreat-gently.trycloudflare.com/manifest.json
 ```
 
-The phone must be on the same WiFi as `172.16.50.x`; the tunnel exposes only the
-small addon JSON, not the media files.
+Items from `172.16.50.x` need the phone on the same WiFi — the tunnel exposes only the
+small addon JSON, not those media files. Items from `*.circleftp.net` are on public
+hostnames, so they also play over mobile data.
 
 ## Setup
 
@@ -67,6 +72,13 @@ Then in Stremio: **Addons → Add addon URL** and paste:
 
 ```
 http://127.0.0.1:7000/manifest.json
+```
+
+To add only the public Circle hosts and merge without re-crawling the LAN:
+
+```bash
+INDEX_FILE=/tmp/circle-index.json npm run index -- --only circleftp
+node scripts/merge-index.js data/index.json /tmp/circle-index.json
 ```
 
 `npm start -- --install` installs it into the desktop app directly, and
@@ -85,6 +97,7 @@ All config is via environment variables.
 | `CRAWL_MAX_DEPTH` | `10` | Max directory depth |
 | `CRAWL_MAX_ITEMS` | `0` | Stop after N titles (0 = unlimited) |
 | `FETCH_TIMEOUT_MS` | `20000` | Per-directory timeout |
+| `INDEX_FILE` | `data/index.json` | Index path (useful for crawling extra roots separately) |
 
 Quick smoke test with one root:
 

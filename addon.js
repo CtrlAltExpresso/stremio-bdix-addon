@@ -83,8 +83,8 @@ function metaOf(item) {
 }
 
 const manifest = {
-    id: 'org.sakib.dhakaflix.bdix',
-    version: '1.0.0',
+    id: 'org.sakib.bdix',
+    version: '1.1.0',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: ['catalog', 'meta', 'stream'],

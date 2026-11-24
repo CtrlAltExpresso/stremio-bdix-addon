@@ -50,6 +50,9 @@ http://172.16.50.7/DHAKA-FLIX-7/.../movie.mkv
 `172.16.x.x` is a private LAN address. It works when the phone is on your WiFi,
 but not over mobile data. The tunnel only exposes the addon JSON, not the media.
 
+Items from the public `*.circleftp.net` hosts added through `main.circleftp.net`
+have normal public URLs, so those play fine over mobile data without a VPN.
+
 If you want to watch over mobile data, pick one:
 
 - Run WireGuard/Tailscale on the phone so it can reach `172.16.50.x`.
