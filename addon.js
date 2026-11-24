@@ -4,7 +4,7 @@
 const fs = require('node:fs')
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk')
 const config = require('./lib/config')
-const { safeDecode, streamFor, formatBytes, normalizeTitle, decodeId } = require('./lib/util')
+const { safeDecode, streamFor, formatBytes, normalizeTitle, decodeId, qualityOf } = require('./lib/util')
 
 function loadIndex() {
     if (!fs.existsSync(config.INDEX_FILE)) {
@@ -95,11 +95,13 @@ function matchByAlias(type, name, year) {
     return bestScore >= 3 ? best : null
 }
 
+// One IMDb title can exist on several BDIX hosts and at several qualities.
+// Return every matching local item so the source picker offers all copies.
 async function resolveImdb(type, imdbId) {
     const key = `${type}:${imdbId}`
     if (imdbCache.has(key)) return imdbCache.get(key)
 
-    let item = null
+    let items = []
     try {
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), 10000)
@@ -114,24 +116,63 @@ async function resolveImdb(type, imdbId) {
         if (response.ok) {
             const meta = (await response.json()).meta
             if (meta && meta.name) {
-                const candidates = state.byTitle.get(`${type}:${normalizeTitle(meta.name)}`) || []
                 const year = Number.parseInt(String(meta.year || meta.releaseInfo || '').slice(0, 4), 10)
-                if (candidates.length) {
-                    item = (year && candidates.find((candidate) =>
-                        Math.abs((candidate.year || 0) - year) <= 1
-                    )) || candidates[0]
-                } else {
-                    item = matchByAlias(type, meta.name, year)
+                const candidates = (state.byTitle.get(`${type}:${normalizeTitle(meta.name)}`) || [])
+                    .filter((candidate) => !year || Math.abs((candidate.year || 0) - year) <= 1)
+                const alias = matchByAlias(type, meta.name, year)
+                items = candidates.length ? candidates : (alias ? [alias] : [])
+                if (items.length) {
+                    console.error(`[imdb] ${type}/${imdbId} -> ${
+                        items.map((item) => `${item.name} (${item.year})`).join('; ')
+                    }`)
                 }
-                if (item) console.error(`[imdb] ${type}/${imdbId} -> ${item.name} (${item.year})`)
             }
         }
     } catch (error) {
         console.error(`[imdb] ${type}/${imdbId}: ${error.message}`)
     }
 
-    imdbCache.set(key, item)
-    return item
+    imdbCache.set(key, items)
+    return items
+}
+
+function qualityRank(value) {
+    const text = String(value || '')
+        .match(/\b(2160p|4k|1080p|720p|480p)\b/i)?.[0]
+        ?.toLowerCase()
+    return ({ '2160p': 4, '4k': 4, '1080p': 3, '720p': 2, '480p': 1 })[text] || 0
+}
+
+function hostOf(url) {
+    try {
+        return new URL(url).hostname
+    } catch {
+        return 'BDIX'
+    }
+}
+
+function labelFor(name, url) {
+    const quality = qualityOf(url)
+    const base = name || quality
+    const label = base.toLowerCase().includes(quality.toLowerCase())
+        ? base
+        : `${base} · ${quality}`
+    return `${label} · ${hostOf(url)}`
+}
+
+function finishStreams(streams) {
+    const seen = new Set()
+    return streams
+        .filter((stream) => {
+            if (!stream.url || seen.has(stream.url)) return false
+            seen.add(stream.url)
+            return true
+        })
+        .sort((a, b) =>
+            qualityRank(`${b.name} ${b.description}`) - qualityRank(`${a.name} ${a.description}`) ||
+            (b.behaviorHints.videoSize || 0) - (a.behaviorHints.videoSize || 0)
+        )
+        .slice(0, 100)
 }
 
 setInterval(() => {
@@ -188,7 +229,7 @@ const manifest = {
     // re-install from the same URL with the same ID keeps the old (v1.1.0)
     // manifest whose idPrefixes omitted "tt". A new ID forces a fresh fetch.
     id: 'org.sakib.bdix.v2',
-    version: '1.2.4',
+    version: '1.2.5',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: [
@@ -291,26 +332,34 @@ builder.defineStreamHandler(async (args) => {
     const imdb = id.match(/^(tt\d+)(?::(\d+):(\d+))?$/)
     if (!imdb) return { streams: [], cacheMaxAge: 3600 }
 
-    const item = await resolveImdb(type, imdb[1])
-    if (!item) return { streams: [], cacheMaxAge: 3600 }
+    const items = await resolveImdb(type, imdb[1])
+    if (!items.length) return { streams: [], cacheMaxAge: 3600 }
 
-    let streams = []
-    if (item.type === 'movie') {
-        streams = [streamFor(item.url, { size: item.size })]
-    } else {
-        const season = imdb[2] ? Number(imdb[2]) : null
-        const episode = imdb[3] ? Number(imdb[3]) : null
-        streams = (item.videos || [])
-            .filter((video) => season === null ||
-                (video.season === season && (episode === null || video.episode === episode)))
-            .map((video) => streamFor(video.url, {
-                name: video.title,
+    const season = imdb[2] ? Number(imdb[2]) : null
+    const episode = imdb[3] ? Number(imdb[3]) : null
+    const streams = []
+
+    for (const item of items) {
+        if (item.type === 'movie') {
+            streams.push(streamFor(item.url, {
+                name: labelFor(null, item.url),
+                size: item.size
+            }))
+            continue
+        }
+        for (const video of item.videos || []) {
+            if (season !== null && (video.season !== season ||
+                (episode !== null && video.episode !== episode))) continue
+            streams.push(streamFor(video.url, {
+                name: labelFor(video.title, video.url),
                 size: video.size,
                 filename: video.filename
             }))
+        }
     }
 
-    return { streams, cacheMaxAge: streams.length ? 86400 : 3600 }
+    const resolved = finishStreams(streams)
+    return { streams: resolved, cacheMaxAge: resolved.length ? 86400 : 3600 }
 })
 
 if (!fs.existsSync(config.PUBLIC_PATH)) fs.mkdirSync(config.PUBLIC_PATH, { recursive: true })
