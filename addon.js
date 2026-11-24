@@ -229,7 +229,7 @@ const manifest = {
     // re-install from the same URL with the same ID keeps the old (v1.1.0)
     // manifest whose idPrefixes omitted "tt". A new ID forces a fresh fetch.
     id: 'org.sakib.bdix.v2',
-    version: '1.2.5',
+    version: '1.2.6',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: [
@@ -304,10 +304,16 @@ builder.defineStreamHandler(async (args) => {
     if (state.byId.has(id)) {
         const item = state.byId.get(id)
         if (item.type === 'series') return { streams: [], cacheMaxAge: 3600 }
-        return {
-            streams: [streamFor(item.url, { size: item.size })],
-            cacheMaxAge: 86400
+        const streams = (item.videos || []).map((video) => streamFor(video.url, {
+            name: labelFor(video.title, video.url),
+            size: video.size,
+            filename: video.filename
+        }))
+        if (!streams.length && item.url) {
+            streams.push(streamFor(item.url, { name: labelFor(null, item.url), size: item.size }))
         }
+        const resolved = finishStreams(streams)
+        return { streams: resolved, cacheMaxAge: resolved.length ? 86400 : 3600 }
     }
 
     // Episode IDs are "df1:" + base64url(file URL). Decode them before lookup;
@@ -341,10 +347,16 @@ builder.defineStreamHandler(async (args) => {
 
     for (const item of items) {
         if (item.type === 'movie') {
-            streams.push(streamFor(item.url, {
-                name: labelFor(null, item.url),
-                size: item.size
-            }))
+            const videos = (item.videos || []).length
+                ? item.videos
+                : [{ url: item.url, size: item.size, filename: item.url }]
+            for (const video of videos) {
+                streams.push(streamFor(video.url, {
+                    name: labelFor(video.title, video.url),
+                    size: video.size,
+                    filename: video.filename
+                }))
+            }
             continue
         }
         for (const video of item.videos || []) {

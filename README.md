@@ -1,8 +1,7 @@
 # Stremio BDIX Addon
 
-[**Install this addon in Stremio — one click**](stremio://res-enclosure-retreat-gently.trycloudflare.com/manifest.json)
-
-If GitHub blocks that link, open https://res-enclosure-retreat-gently.trycloudflare.com/ and tap **INSTALL**.
+**One-click install:** run `npm run phone`, then open the printed HTTPS URL on your phone and tap **INSTALL**.  
+The printed `stremio://...` link opens Stremio directly and asks to add the addon. Quick-tunnel URLs change on every restart; a permanent link needs a named tunnel (see [docs/PHONE.md](docs/PHONE.md)).
 
 Indexes BDIX h5ai media servers — both the LAN hosts and the public hosts linked by
 `http://main.circleftp.net/` — and exposes them as Stremio catalogs with **direct HTTP
@@ -22,13 +21,21 @@ streams**. No FTP proxy is needed: the files already return `Accept-Ranges: byte
 
 The crawler reads h5ai directory listings recursively, builds one catalog item per
 movie folder, and one `series` item per series folder with `Season N` subfolders.
+**Every video in a movie folder is indexed**, not just one file, so the source picker
+shows all available copies. The largest file remains the primary movie ID so existing
+library links stay valid.
 
 ## Current index
 
-**62,577 titles** (56,950 movies + 5,627 series) from 63,374 directories across 27 roots:
-17 LAN roots + 10 public roots from `main.circleftp.net`. 2 old LAN directory fetches
-timed out; the Circle crawl had 0 errors. `ftp3` and `ftp5` were excluded because they
-timed out from the crawl machine, but their paths can be added to `DEFAULT_ROOTS` later.
+**73,563 titles** (57,949 movies + 15,614 series) from about 76,013 directories across
+38 roots: 17 LAN roots + 21 public roots from `main.circleftp.net`. 2 LAN directory
+fetches timed out; all reachable Circle hosts crawled cleanly after fixing h5ai links
+that contained `&amp;`. `ftp3`/`ftp4`/`ftp5` and the games/software hosts are excluded:
+they either time out from this machine or contain no media.
+
+Verified example: **The Odyssey (2026)** returns 4 direct streams — 1080p from
+`index2.circleftp.net`, two 1080p copies from `172.16.50.14`, and 720p from
+`172.16.50.7`. All 4 returned `206` for a 1 KiB range request.
 
 ## One-click install on phone
 
@@ -43,17 +50,8 @@ It prints an HTTPS URL and a `stremio://...` link. Open the HTTPS URL on your ph
 tap **INSTALL**, and Stremio will ask whether to add the addon. Full details are in
 [docs/PHONE.md](docs/PHONE.md).
 
-Current quick-tunnel link (changes whenever the tunnel restarts):
-
-```
-https://res-enclosure-retreat-gently.trycloudflare.com/
-```
-
-Tap-style deep link:
-
-```
-stremio://res-enclosure-retreat-gently.trycloudflare.com/manifest.json
-```
+The tunnel URL is printed by `npm run phone`; do not hard-code it here because it changes
+every time the tunnel restarts.
 
 Items from `172.16.50.x` need the phone on the same WiFi — the tunnel exposes only the
 small addon JSON, not those media files. Items from `*.circleftp.net` are on public
