@@ -43,9 +43,37 @@ function titleTokens(name) {
     return normalizeTitle(name).split(' ').filter((token) => token.length >= 4)
 }
 
+// Folder names and Cinemeta titles often differ by one letter (for example
+// "Abrahaminte" vs "Abhrahaminte"). Dice coefficient over character bigrams
+// catches that without matching unrelated titles.
+function tokenSimilarity(a, b) {
+    if (a === b) return 1
+    if (a.length < 4 || b.length < 4 || Math.abs(a.length - b.length) > 2) return 0
+    const counts = new Map()
+    for (let i = 0; i < a.length - 1; i += 1) {
+        const gram = a.slice(i, i + 2)
+        counts.set(gram, (counts.get(gram) || 0) + 1)
+    }
+    let shared = 0
+    for (let i = 0; i < b.length - 1; i += 1) {
+        const gram = b.slice(i, i + 2)
+        const left = counts.get(gram) || 0
+        if (left) {
+            counts.set(gram, left - 1)
+            shared += 1
+        }
+    }
+    return (2 * shared) / (a.length + b.length - 2)
+}
+
+function hasToken(tokens, wanted) {
+    if (!wanted) return false
+    return tokens.some((token) => tokenSimilarity(wanted, token) >= 0.78)
+}
+
 // Cinemeta sometimes uses a localized title ("Kamisama Kiss") while the folder
-// uses the original one ("Kamisama Hajimemashita"). Require the same year and a
-// shared leading token so we don't match unrelated titles.
+// uses the original one ("Kamisama Hajimemashita") or a near-homonym. Require
+// the same year plus enough shared/fuzzy tokens so unrelated titles are skipped.
 function matchByAlias(type, name, year) {
     const wanted = titleTokens(name)
     if (!wanted.length) return null
@@ -55,9 +83,9 @@ function matchByAlias(type, name, year) {
     for (const item of state.byType[type] || []) {
         if (year && Math.abs((item.year || 0) - year) > 1) continue
         const tokens = titleTokens(item.name)
-        const shared = wanted.filter((token) => tokens.includes(token)).length
-        const leading = (wanted[0] && tokens.includes(wanted[0])) ||
-            (tokens[0] && wanted.includes(tokens[0])) ? 2 : 0
+        if (!tokens.length) continue
+        const shared = wanted.filter((token) => hasToken(tokens, token)).length
+        const leading = (hasToken(tokens, wanted[0]) || hasToken(wanted, tokens[0])) ? 2 : 0
         const score = shared + leading
         if (score > bestScore) {
             bestScore = score
@@ -156,8 +184,11 @@ function metaOf(item) {
 }
 
 const manifest = {
-    id: 'org.sakib.bdix',
-    version: '1.2.3',
+    // Bumped ID: Stremio caches the manifest by addon ID + transport URL, so a
+    // re-install from the same URL with the same ID keeps the old (v1.1.0)
+    // manifest whose idPrefixes omitted "tt". A new ID forces a fresh fetch.
+    id: 'org.sakib.bdix.v2',
+    version: '1.2.4',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: [
