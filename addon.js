@@ -4,7 +4,7 @@
 const fs = require('node:fs')
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk')
 const config = require('./lib/config')
-const { safeDecode, streamFor, formatBytes, normalizeTitle } = require('./lib/util')
+const { safeDecode, streamFor, formatBytes, normalizeTitle, decodeId } = require('./lib/util')
 
 function loadIndex() {
     if (!fs.existsSync(config.INDEX_FILE)) {
@@ -39,6 +39,34 @@ const imdbCache = new Map()
 // Cinemeta owns IMDb metadata. Resolve an IMDb ID to a title/year, then match
 // that title against our local index so BDIX streams appear on normal Stremio
 // detail pages (the same pages where Torrentio shows up).
+function titleTokens(name) {
+    return normalizeTitle(name).split(' ').filter((token) => token.length >= 4)
+}
+
+// Cinemeta sometimes uses a localized title ("Kamisama Kiss") while the folder
+// uses the original one ("Kamisama Hajimemashita"). Require the same year and a
+// shared leading token so we don't match unrelated titles.
+function matchByAlias(type, name, year) {
+    const wanted = titleTokens(name)
+    if (!wanted.length) return null
+
+    let best = null
+    let bestScore = 0
+    for (const item of state.byType[type] || []) {
+        if (year && Math.abs((item.year || 0) - year) > 1) continue
+        const tokens = titleTokens(item.name)
+        const shared = wanted.filter((token) => tokens.includes(token)).length
+        const leading = (wanted[0] && tokens.includes(wanted[0])) ||
+            (tokens[0] && wanted.includes(tokens[0])) ? 2 : 0
+        const score = shared + leading
+        if (score > bestScore) {
+            bestScore = score
+            best = item
+        }
+    }
+    return bestScore >= 3 ? best : null
+}
+
 async function resolveImdb(type, imdbId) {
     const key = `${type}:${imdbId}`
     if (imdbCache.has(key)) return imdbCache.get(key)
@@ -64,7 +92,10 @@ async function resolveImdb(type, imdbId) {
                     item = (year && candidates.find((candidate) =>
                         Math.abs((candidate.year || 0) - year) <= 1
                     )) || candidates[0]
+                } else {
+                    item = matchByAlias(type, meta.name, year)
                 }
+                if (item) console.error(`[imdb] ${type}/${imdbId} -> ${item.name} (${item.year})`)
             }
         }
     } catch (error) {
@@ -109,29 +140,24 @@ function metaOf(item) {
         item.size ? ` · ${formatBytes(item.size)}` : ''
     }`
     if (item.year) meta.released = `${item.year}-01-01`
+    // Do NOT embed video.streams here: per the SDK docs that makes Stremio skip
+    // the stream resource for this video entirely (no source picker, no other addons).
     meta.videos = (item.videos || []).map((video) => ({
         id: video.id,
         title: video.title,
         ...(video.season ? { season: video.season } : {}),
         ...(video.episode ? { episode: video.episode } : {}),
-        ...(video.released ? { released: video.released } : {}),
-        streams: [streamFor(video.url, { name: video.name, size: video.size, filename: video.filename })],
-        available: true
+        ...(video.released ? { released: video.released } : {})
     }))
     if (item.type === 'movie' && !meta.videos.length) {
-        meta.videos = [{
-            id: item.id,
-            title: item.name,
-            streams: [streamFor(item.url, { size: item.size })],
-            available: true
-        }]
+        meta.videos = [{ id: item.id, title: item.name }]
     }
     return meta
 }
 
 const manifest = {
     id: 'org.sakib.bdix',
-    version: '1.2.0',
+    version: '1.2.3',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: [
@@ -164,7 +190,19 @@ const manifest = {
 
 const builder = new addonBuilder(manifest)
 
-builder.defineCatalogHandler(async ({ type, extra }) => {
+function logCall(resource, args) {
+    const line = `${new Date().toISOString()} ${resource} type=${args.type || '-'} id=${args.id || '-'} extra=${JSON.stringify(args.extra || {})}\n`
+    console.error(line.trim())
+    try {
+        fs.appendFileSync('/tmp/opencode/addon-requests.log', line)
+    } catch {
+        // logging must never break a request
+    }
+}
+
+builder.defineCatalogHandler(async (args) => {
+    logCall('catalog', args)
+    const { type, extra } = args
     let items = state.byType[type] || []
     const search = extra && (extra.search || extra.query)
     if (search) {
@@ -178,13 +216,17 @@ builder.defineCatalogHandler(async ({ type, extra }) => {
     return { metas: items.slice(0, 3000).map(previewOf), cacheMaxAge: 300 }
 })
 
-builder.defineMetaHandler(async ({ type, id }) => {
+builder.defineMetaHandler(async (args) => {
+    logCall('meta', args)
+    const { type, id } = args
     const item = state.byId.get(id)
     if (!item || item.type !== type) return { meta: {} }
     return { meta: metaOf(item), cacheMaxAge: 86400 }
 })
 
-builder.defineStreamHandler(async ({ type, id }) => {
+builder.defineStreamHandler(async (args) => {
+    logCall('stream', args)
+    const { type, id } = args
     if (typeof id !== 'string') return { streams: [], cacheMaxAge: 3600 }
 
     if (state.byId.has(id)) {
@@ -196,15 +238,19 @@ builder.defineStreamHandler(async ({ type, id }) => {
         }
     }
 
-    if (state.byUrl.has(id)) {
-        const hit = state.byUrl.get(id)
-        const url = hit.url || (hit.video && hit.video.url)
+    // Episode IDs are "df1:" + base64url(file URL). Decode them before lookup;
+    // otherwise every series episode stream request would return zero streams.
+    const decodedUrl = decodeId(id)
+    const hit = state.byUrl.get(decodedUrl || id)
+    if (hit) {
+        const video = hit.video
+        const url = video ? video.url : (hit.item && hit.item.type === 'movie' ? hit.item.url : null)
         if (!url) return { streams: [], cacheMaxAge: 3600 }
         return {
             streams: [streamFor(url, {
-                name: hit.video && hit.video.title,
-                size: (hit.video && hit.video.size) || (hit.item && hit.item.size),
-                filename: hit.video && hit.video.filename
+                name: video && video.title,
+                size: (video && video.size) || (hit.item && hit.item.size),
+                filename: video && video.filename
             })],
             cacheMaxAge: 86400
         }

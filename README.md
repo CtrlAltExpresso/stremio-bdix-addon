@@ -133,6 +133,11 @@ Two ID paths are supported:
   and year against the local index, and returns the matching episode's direct
   stream. Results are cached in memory.
 
+Meta responses deliberately do **not** include `video.streams`. Per the SDK spec,
+embedded streams are exclusive: Stremio would skip the `stream` resource entirely
+and no source picker would appear. Episode `df1:` IDs are decoded back to file URLs
+before the stream lookup, so series episodes work from this addon's own catalog too.
+
 If Stremio still does not list this addon in a title's source picker, remove the
 addon and re-add it from the install link so it picks up the updated manifest.
 Matching is by normalized title + year; unusually named folders may not match.
