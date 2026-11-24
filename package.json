@@ -2,7 +2,7 @@
   "name": "stremio-bdix-addon",
   "version": "1.0.0",
   "private": true,
-  "description": "Stremio addon that indexes DhakaFlix/BDIX h5ai media servers and returns direct HTTP streams",
+  "description": "Stremio addon that indexes BDIX h5ai media servers and returns direct HTTP streams",
   "main": "addon.js",
   "scripts": {
     "index": "node index.js",

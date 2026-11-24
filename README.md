@@ -1,16 +1,19 @@
-# DhakaFlix BDIX — Stremio addon
+# Stremio BDIX Addon
 
-Repository: https://github.com/CtrlAltExpresso/stremio-bdix-addon
+[**Install this addon in Stremio — one click**](stremio://res-enclosure-retreat-gently.trycloudflare.com/manifest.json)
 
-Indexes the BDIX/DhakaFlix h5ai media servers and exposes them as Stremio catalogs
-with **direct HTTP streams**. No FTP proxy is needed: the media is already served over
-HTTP with `Accept-Ranges: bytes` (verified on `http://172.16.50.7/`), so seeking works.
+If GitHub blocks that link, open https://res-enclosure-retreat-gently.trycloudflare.com/ and tap **INSTALL**.
+
+Indexes BDIX h5ai media servers (LAN hosts and `main.circleftp.net`) and exposes them as
+Stremio catalogs with **direct HTTP streams**. No FTP proxy is needed: the media is
+already served over HTTP with `Accept-Ranges: bytes` (verified on `http://172.16.50.7/`),
+so seeking works.
 
 ## What was checked
 
 | Endpoint | Result |
 | --- | --- |
-| `http://172.16.50.7/` | nginx + h5ai index, "DhakaFlix" portal |
+| `http://172.16.50.7/` | nginx + h5ai media index |
 | `http://172.16.50.7/DHAKA-FLIX-7/English Movies/(2024)/...` | per-title folders, `a_AL_.jpg` posters, direct `.mkv` files |
 | Direct `.mkv` HEAD | `200`, `Content-Length`, `Accept-Ranges: bytes` |
 | `http://main.circleftp.net/` | WordPress front-end listing the same library |

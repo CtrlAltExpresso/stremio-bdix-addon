@@ -85,8 +85,8 @@ function metaOf(item) {
 const manifest = {
     id: 'org.sakib.dhakaflix.bdix',
     version: '1.0.0',
-    name: 'DhakaFlix BDIX',
-    description: 'Local BDIX/DhakaFlix library. Direct HTTP streams from your own media server.',
+    name: 'Stremio BDIX Addon',
+    description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
     resources: ['catalog', 'meta', 'stream'],
     types: ['movie', 'series'],
     idPrefixes: ['df1:'],
