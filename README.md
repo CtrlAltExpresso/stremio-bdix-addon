@@ -1,5 +1,7 @@
 # DhakaFlix BDIX — Stremio addon
 
+Repository: https://github.com/CtrlAltExpresso/stremio-bdix-addon
+
 Indexes the BDIX/DhakaFlix h5ai media servers and exposes them as Stremio catalogs
 with **direct HTTP streams**. No FTP proxy is needed: the media is already served over
 HTTP with `Accept-Ranges: bytes` (verified on `http://172.16.50.7/`), so seeking works.
