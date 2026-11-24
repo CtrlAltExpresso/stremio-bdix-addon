@@ -120,10 +120,25 @@ GET /stream/movie/<id>.json
 
 ## How the IDs work
 
-`df1:` + base64url of the media URL. The movie catalog/meta ID is the video URL;
-series meta IDs are folder URLs and episode video IDs are file URLs. The stream
-handler decodes the ID and returns a direct HTTP stream with `notWebReady: true`
-(Stremio desktop uses its internal player for HTTP MKV files).
+Two ID paths are supported:
+
+- `df1:` + base64url of the media URL — used by this addon's own catalog. Movie
+  catalog/meta IDs are video URLs; series meta IDs are folder URLs and episode
+  video IDs are file URLs.
+- `tt...` — normal IMDb IDs used by Cinemeta, Torrentio and the rest of Stremio.
+  The manifest declares the `stream` resource for both prefixes, so this addon
+  is called when you open a title from **any** addon, not just from its own
+  catalog. For a `ttID:season:episode` request, the addon resolves the IMDb ID
+  through Cinemeta (`https://v3-cinemeta.strem.io/meta/...`), matches the title
+  and year against the local index, and returns the matching episode's direct
+  stream. Results are cached in memory.
+
+If Stremio still does not list this addon in a title's source picker, remove the
+addon and re-add it from the install link so it picks up the updated manifest.
+Matching is by normalized title + year; unusually named folders may not match.
+
+Streams are returned with `notWebReady: true` for plain HTTP files (Stremio Web
+cannot play them directly; desktop/mobile use their native player).
 
 ## Access from other devices
 

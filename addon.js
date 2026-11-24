@@ -4,7 +4,7 @@
 const fs = require('node:fs')
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk')
 const config = require('./lib/config')
-const { safeDecode, streamFor, formatBytes } = require('./lib/util')
+const { safeDecode, streamFor, formatBytes, normalizeTitle } = require('./lib/util')
 
 function loadIndex() {
     if (!fs.existsSync(config.INDEX_FILE)) {
@@ -13,6 +13,7 @@ function loadIndex() {
     const raw = JSON.parse(fs.readFileSync(config.INDEX_FILE, 'utf8'))
     const byId = new Map()
     const byUrl = new Map()
+    const byTitle = new Map()
     const byType = { movie: [], series: [] }
 
     for (const item of raw.items || []) {
@@ -22,19 +23,65 @@ function loadIndex() {
             byUrl.set(video.url, { item, video })
         }
         if (byType[item.type]) byType[item.type].push(item)
+        const titleKey = `${item.type}:${normalizeTitle(item.name)}`
+        if (!byTitle.has(titleKey)) byTitle.set(titleKey, [])
+        byTitle.get(titleKey).push(item)
     }
 
     const mtime = fs.statSync(config.INDEX_FILE).mtimeMs
     console.error(`[addon] loaded ${raw.items.length} titles (${raw.generatedAt})`)
-    return { raw, byId, byUrl, byType, mtime }
+    return { raw, byId, byUrl, byTitle, byType, mtime }
 }
 
 let state = loadIndex()
+const imdbCache = new Map()
+
+// Cinemeta owns IMDb metadata. Resolve an IMDb ID to a title/year, then match
+// that title against our local index so BDIX streams appear on normal Stremio
+// detail pages (the same pages where Torrentio shows up).
+async function resolveImdb(type, imdbId) {
+    const key = `${type}:${imdbId}`
+    if (imdbCache.has(key)) return imdbCache.get(key)
+
+    let item = null
+    try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), 10000)
+        let response
+        try {
+            response = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`, {
+                signal: controller.signal
+            })
+        } finally {
+            clearTimeout(timer)
+        }
+        if (response.ok) {
+            const meta = (await response.json()).meta
+            if (meta && meta.name) {
+                const candidates = state.byTitle.get(`${type}:${normalizeTitle(meta.name)}`) || []
+                const year = Number.parseInt(String(meta.year || meta.releaseInfo || '').slice(0, 4), 10)
+                if (candidates.length) {
+                    item = (year && candidates.find((candidate) =>
+                        Math.abs((candidate.year || 0) - year) <= 1
+                    )) || candidates[0]
+                }
+            }
+        }
+    } catch (error) {
+        console.error(`[imdb] ${type}/${imdbId}: ${error.message}`)
+    }
+
+    imdbCache.set(key, item)
+    return item
+}
 
 setInterval(() => {
     try {
         const mtime = fs.statSync(config.INDEX_FILE).mtimeMs
-        if (mtime !== state.mtime) state = loadIndex()
+        if (mtime !== state.mtime) {
+            state = loadIndex()
+            imdbCache.clear()
+        }
     } catch (error) {
         console.error(`[addon] index reload failed: ${error.message}`)
     }
@@ -84,12 +131,17 @@ function metaOf(item) {
 
 const manifest = {
     id: 'org.sakib.bdix',
-    version: '1.1.0',
+    version: '1.2.0',
     name: 'Stremio BDIX Addon',
     description: 'BDIX media library (LAN h5ai + main.circleftp.net) with direct HTTP streams.',
-    resources: ['catalog', 'meta', 'stream'],
+    resources: [
+        'catalog',
+        { name: 'meta', types: ['movie', 'series'], idPrefixes: ['df1:'] },
+        // "tt" makes the addon appear alongside Torrentio on IMDb-based pages.
+        { name: 'stream', types: ['movie', 'series'], idPrefixes: ['df1:', 'tt'] }
+    ],
     types: ['movie', 'series'],
-    idPrefixes: ['df1:'],
+    idPrefixes: ['df1:', 'tt'],
     catalogs: [
         {
             type: 'movie',
@@ -132,31 +184,56 @@ builder.defineMetaHandler(async ({ type, id }) => {
     return { meta: metaOf(item), cacheMaxAge: 86400 }
 })
 
-builder.defineStreamHandler(async ({ id }) => {
-    let url = null
-    let video = null
-    let item = null
+builder.defineStreamHandler(async ({ type, id }) => {
+    if (typeof id !== 'string') return { streams: [], cacheMaxAge: 3600 }
 
     if (state.byId.has(id)) {
-        item = state.byId.get(id)
+        const item = state.byId.get(id)
         if (item.type === 'series') return { streams: [], cacheMaxAge: 3600 }
-        url = item.url
-    } else if (state.byUrl.has(id)) {
-        const hit = state.byUrl.get(id)
-        url = hit.url || (hit.video && hit.video.url)
-        item = hit.item || null
-        video = hit.video || null
+        return {
+            streams: [streamFor(item.url, { size: item.size })],
+            cacheMaxAge: 86400
+        }
     }
 
-    if (!url) return { streams: [], cacheMaxAge: 3600 }
-    return {
-        streams: [streamFor(url, {
-            name: video && video.name,
-            size: (video && video.size) || (item && item.size),
-            filename: video && video.filename
-        })],
-        cacheMaxAge: 86400
+    if (state.byUrl.has(id)) {
+        const hit = state.byUrl.get(id)
+        const url = hit.url || (hit.video && hit.video.url)
+        if (!url) return { streams: [], cacheMaxAge: 3600 }
+        return {
+            streams: [streamFor(url, {
+                name: hit.video && hit.video.title,
+                size: (hit.video && hit.video.size) || (hit.item && hit.item.size),
+                filename: hit.video && hit.video.filename
+            })],
+            cacheMaxAge: 86400
+        }
     }
+
+    // Normal Stremio detail pages use IMDb IDs (tt1234567:season:episode).
+    const imdb = id.match(/^(tt\d+)(?::(\d+):(\d+))?$/)
+    if (!imdb) return { streams: [], cacheMaxAge: 3600 }
+
+    const item = await resolveImdb(type, imdb[1])
+    if (!item) return { streams: [], cacheMaxAge: 3600 }
+
+    let streams = []
+    if (item.type === 'movie') {
+        streams = [streamFor(item.url, { size: item.size })]
+    } else {
+        const season = imdb[2] ? Number(imdb[2]) : null
+        const episode = imdb[3] ? Number(imdb[3]) : null
+        streams = (item.videos || [])
+            .filter((video) => season === null ||
+                (video.season === season && (episode === null || video.episode === episode)))
+            .map((video) => streamFor(video.url, {
+                name: video.title,
+                size: video.size,
+                filename: video.filename
+            }))
+    }
+
+    return { streams, cacheMaxAge: streams.length ? 86400 : 3600 }
 })
 
 if (!fs.existsSync(config.PUBLIC_PATH)) fs.mkdirSync(config.PUBLIC_PATH, { recursive: true })
