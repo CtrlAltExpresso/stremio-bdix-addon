@@ -1,8 +1,8 @@
 # Stremio BDIX Addon
 
-[**Install this addon in Stremio — one click**](stremio://ceremony-utility-organisation-films.trycloudflare.com/manifest.json)
+[**Install this addon in Stremio — one click**](https://specially-bean-close-duck.trycloudflare.com/public/install.html)
 
-If GitHub blocks the deep link, open https://ceremony-utility-organisation-films.trycloudflare.com/ and tap **INSTALL**. Quick-tunnel URLs change on every restart; regenerate with `npm run phone` (see [docs/PHONE.md](docs/PHONE.md)).
+GitHub strips `stremio://` links from rendered READMEs, so the button above points to an HTTPS page that immediately opens `stremio://...manifest.json` and asks Stremio to add the addon. If your browser blocks the auto-open, tap **Open in Stremio** on that page. The addon and tunnel run as systemd user services, so they survive shell/session restarts; a quick-tunnel URL can still change if the tunnel restarts.
 
 Indexes BDIX h5ai media servers — both the LAN hosts and the public hosts linked by
 `http://main.circleftp.net/` — and exposes them as Stremio catalogs with **direct HTTP
@@ -51,16 +51,16 @@ It prints an HTTPS URL and a `stremio://...` link. Open the HTTPS URL on your ph
 tap **INSTALL**, and Stremio will ask whether to add the addon. Full details are in
 [docs/PHONE.md](docs/PHONE.md).
 
-Current temporary HTTPS URL (verified live, changes on tunnel restart):
+Current one-click page (verified live, changes on tunnel restart):
 
 ```
-https://ceremony-utility-organisation-films.trycloudflare.com/
+https://specially-bean-close-duck.trycloudflare.com/public/install.html
 ```
 
-Deep link:
+Raw manifest URL for manual add:
 
 ```
-stremio://ceremony-utility-organisation-films.trycloudflare.com/manifest.json
+https://specially-bean-close-duck.trycloudflare.com/manifest.json
 ```
 
 Items from `172.16.50.x` need the phone on the same WiFi — the tunnel exposes only the
